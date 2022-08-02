@@ -3,3 +3,4 @@ images.tar
 *.pyc
 .DS_Store
 test.py
+ignored_files/
