@@ -1,74 +1,37 @@
-# Imported Libraries
-import tensorflow as tf
-import tensorflow_hub as hub
-import numpy as np
-import os
+# Imported libraries
+from dog import DogModel
+from flask import Response, Flask, render_template
 import cv2
-from object import ObjectDetectModel
+import threading
+import argparse
 
-class DogModel(ObjectDetectModel):
-   def __init__(self, model_path) -> None:
-      super().__init__()
-      # Declaring instances
-      self.breed_model = None
-   
-      # Loads model
-      self.load_model(model_path)
 
-   def load_model(self, model_path):
-      """
-      Loads a saved model from a specified path
-      """
-      print(f"Loading saved model from: {model_path}")
-      model = tf.keras.models.load_model(model_path,
-                                          custom_objects={"KerasLayer" : hub.KerasLayer})
-      self.breed_model = model
-   
-   def process_image(self, image, length=224, width=224):
-      """
-      Processes the image into a 224x224x3 tensor with values ranging from 0-1, 
-      then converts it to a batch for prediction
-      """
-      new_image, coordinates = self.getDogCrop(image)
-      if coordinates == -1:
-         return -1, -1
-      processed_image = tf.image.convert_image_dtype(new_image, tf.float32)
-      #Resize to (224,224)
-      processed_image = tf.image.resize(processed_image, size=[length, width])
-      return tf.data.Dataset.from_tensor_slices([processed_image]).batch(32), coordinates
-      
-   # Check accuracy of prediction
-   def predict(self, image, check=False):
-      processed_image, coordinate = self.process_image(image)
-      if processed_image == -1:
-         return -1, -1
-      self.prediction_probability = self.breed_model.predict(processed_image)
-      if check:
-         breed = self.predict_check()
-         return coordinate, breed
-      else:
-         return coordinate
-      
-   def predict_check(self, verbose=False):
-      labels = []
-      for folders in os.listdir("Images/train_images"):
-         labels.append("".join(folders.split("-")[1:]))
-      unique_breeds = np.unique(labels)
-      if verbose:
-         print(unique_breeds)
-         print(self.prediction_probability)
-      label = unique_breeds[np.argmax(self.prediction_probability[0])]
-      score = np.max(self.prediction_probability[0])
-      print(f"Max value (probability of prediction) : {score}")
-      print(f"Sum : {np.sum(self.prediction_probability[0])}")
-      print(f"Max Index: {np.argmax(self.prediction_probability[0])}")
-      print(f"Predicted label: {label}")
-      return (label, score)
 
-def main():
-   model_path = "full_model.hdf5"
+# Initialize outputFrame and thread lock
+outputFrame = None
+lock = threading.Lock()
+
+# Initialize Flask
+app = Flask(__name__)
+
+# Initialize Camera
+video = cv2.VideoCapture(1)
+
+@app.route("/")
+def index():
+   return render_template("index.html")
+
+@app.route("/video_feed")
+def video_feed():
+   return Response(generate(), 
+                  mimetype="multipart/x-mixed-replace; boundary=frame")
+
+# Video Detection function
+def dog_detect(frame_tick=60):
+   global outputFrame, video, lock
+   # Initialize Model
+   model_path = "breed_model/Models/2022_06_29-07_471656488859-full-image-set-mobilenetv2-Adam.h5"
    my_model = DogModel(model_path)
-   video = cv2.VideoCapture(1)
    counter = 0
    RED = (0,0,255)
    WHITE = (255, 255, 255)
@@ -96,13 +59,50 @@ def main():
          cv2.rectangle(frame, pos1, pos2, RED, 4)
          cv2.rectangle(frame, pos_text_rect_1, pos_text_rect_2, RED, -1)
          cv2.putText(frame,  text_list[0], pos_text, cv2.FONT_HERSHEY_DUPLEX, 0.5, WHITE)
-      cv2.imshow("test", frame)
-      
-      #Waits for a user input to quit the application
-      if cv2.waitKey(1) & 0xFF == ord('q'):
-         break
+      with lock:
+         outputFrame = frame.copy()
 
-if __name__ == "__main__":   
-   os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-   print("DOG BREED PREDICTION PROGRAM...")
-   main()
+def generate():
+	# grab global references to the output frame and lock variables
+	global outputFrame, lock
+	# loop over frames from the output stream
+	while True:
+		# wait until the lock is acquired
+		with lock:
+			# check if the output frame is available, otherwise skip
+			# the iteration of the loop
+			if outputFrame is None:
+				continue
+			# encode the frame in JPEG format
+			(flag, encodedImage) = cv2.imencode(".jpg", outputFrame)
+			# ensure the frame was successfully encoded
+			if not flag:
+				continue
+		# yield the output frame in the byte format
+		yield(b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + 
+			bytearray(encodedImage) + b'\r\n')
+
+if __name__ == "__main__":
+   # Construct argument parser for arg in commandline
+   ap = argparse.ArgumentParser()
+   # Argument for IP
+   ap.add_argument("-i", "--ip", type=str, default="127.0.0.1",
+		help="ip address of the device")
+   # Argument for port
+   ap.add_argument("-o", "--port", type=int, default=8000,
+		help="ephemeral port number of the server (1024 to 65535)")
+   # Argument for frame ticker
+   ap.add_argument("-f", "--frame-count", type=int, default=60,
+		help="# of frames used to construct the background model")
+   
+   args = vars(ap.parse_args())
+
+   # start a thread that will perform motion detection
+   t = threading.Thread(target=dog_detect, args=(
+		args["frame_count"],))
+   t.daemon = True
+   t.start()
+	
+   # start the flask app
+   app.run(host=args["ip"], port=args["port"], debug=True,
+		threaded=True, use_reloader=False)
