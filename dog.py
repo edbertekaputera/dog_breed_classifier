@@ -4,26 +4,50 @@ import tensorflow_hub as hub
 import numpy as np
 import os
 import cv2
+import argparse
 from object import ObjectDetectModel
 
 class DogModel(ObjectDetectModel):
+   # Private class attribute
+   __defaultPath = "breed_model/Models/2022_08_04-05_09_1659589784-trained_1000"
+
+   # Constructors
    def __init__(self, model_path) -> None:
       super().__init__()
-      # Declaring instances
-      self.breed_model = None
-   
-      # Loads model
-      self.load_model(model_path)
+      # Private instances
+      self.__breed_model = self.__load_model(model_path)
+   # Alternative Constructor (default)
+   @classmethod
+   def init_default(cls):
+      """
+      Constructs an instance of DogModel with default model path
+      """
+      return cls(cls.__defaultPath)
 
-   def load_model(self, model_path):
+   # Private static method
+   @staticmethod
+   def __load_model(model_path):
       """
       Loads a saved model from a specified path
       """
       print(f"Loading saved model from: {model_path}")
-      model = tf.keras.models.load_model(model_path,
-                                       custom_objects={"KerasLayer" : hub.KerasLayer})
-      self.breed_model = model
-   
+      model = tf.keras.models.load_model(model_path)
+      return model
+
+   # Public getter/setter method for the model
+   @property
+   def breed_model(self):
+      return self.__breed_model
+   @breed_model.setter
+   def set_breed_model(self, path):
+      """
+      Sets the breed model into a new model which would be loaded from the path.
+      Parameters:
+      path = path of the saved model
+      """
+      self.__breed_model = self.__load_model(path)
+
+   # Public instance method
    def process_image(self, image, length=224, width=224):
       """
       Processes the image into a 224x224x3 tensor with values ranging from 0-1, 
@@ -66,8 +90,18 @@ class DogModel(ObjectDetectModel):
       return (label, score)
 
 def main():
-   model_path = "breed_model/Models/2022_06_29-07_471656488859-full-image-set-mobilenetv2-Adam.h5"
-   my_model = DogModel(model_path)
+   ap = argparse.ArgumentParser()
+   ap.add_argument("-p", "--path", type=str,help="path of the saved model.")
+   ap.add_argument("-f", "--frame_tick", type=int, help="detects every x frames.", default=1)
+   args = vars(ap.parse_args())
+   model_path = args["path"]
+   frame_tick = args["frame_tick"]
+   if model_path == None:
+      print("Missing Path Argument...")
+      print("Using default Init")
+      my_model = DogModel.init_default()
+   else:
+      my_model = DogModel(model_path)
    video = cv2.VideoCapture(1)
    counter = 0
    RED = (0,0,255)
@@ -76,10 +110,10 @@ def main():
    text_list = []
    while True:
       ret, frame = video.read()
-      if counter == 60:
+      if counter == frame_tick:
+         coordinates, breed = my_model.predict(frame, check=True)
          box_list = []
          text_list = []
-         coordinates, breed = my_model.predict(frame, check=True)
          if coordinates != -1:
             box_list.append(coordinates)
             text_list.append(f"DOGBREED = {breed[0]} {breed[1]*100:.2f}%")
@@ -106,3 +140,4 @@ if __name__ == "__main__":
    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
    print("DOG BREED PREDICTION PROGRAM...")
    main()
+

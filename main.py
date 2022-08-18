@@ -30,7 +30,7 @@ def video_feed():
 def dog_detect(frame_tick=60):
    global outputFrame, video, lock
    # Initialize Model
-   model_path = "breed_model/Models/2022_06_29-07_471656488859-full-image-set-mobilenetv2-Adam.h5"
+   model_path = "breed_model/Models/2022_08_04-05_09_1659589784-trained_1000"
    my_model = DogModel(model_path)
    counter = 0
    RED = (0,0,255)

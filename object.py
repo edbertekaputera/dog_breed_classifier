@@ -4,17 +4,26 @@ import tensorflow_hub as hub
 import tensorflow as tf
 import numpy as np
 import cv2
+import argparse
 from time import time
 import matplotlib.pyplot as plt
 # from main import DogModel
 
 # ObjectDetectionModel Class
 class ObjectDetectModel:
-   def __init__(self) -> None:
-      self.OBJECT_MODEL_PATH = "ssd_mobilenet_v2_2"
-      self.object_model = tf.saved_model.load(self.OBJECT_MODEL_PATH)
+   # Class attributes
+   __OBJECT_MODEL_PATH = "ssd_mobilenet_v2_2"
 
-   def process_whole_image(self, image):
+   # Special dunder methods
+   def __init__(self) -> None:
+      self.__object_model = self.__loadModel()
+   
+   def __str__(self) -> str:
+      return "SSD MobileNetV2 Object Detection Model"
+   
+   # Static image processing methods
+   @staticmethod
+   def process_whole_image(image):
       """
       Processes the image into a RGB tensor with values ranging from 0-1, 
       Parameters:
@@ -23,6 +32,11 @@ class ObjectDetectModel:
       processed_image = tf.image.convert_image_dtype(image, tf.uint8)
       return np.array([processed_image])
 
+   # Private Instance methods
+   def __loadModel(self):
+      return tf.keras.models.load_model(self.__OBJECT_MODEL_PATH)
+
+   # Public Instance methods
    def detect_object(self, image):
       """
       This function processes the image with the `process_whole_image` function,
@@ -36,7 +50,7 @@ class ObjectDetectModel:
       image: Image to be detected.
       """
       img = self.process_whole_image(image)
-      results = self.object_model(img)
+      results = self.__object_model(img)
       results = {key:value.numpy() for key,value in results.items()}
       class_ids = results["detection_classes"][0]
       boxes = results["detection_boxes"][0]
@@ -81,38 +95,23 @@ class ObjectDetectModel:
 
 def main():
    detect_model = ObjectDetectModel()
-   # image = tf.io.read_file("test.png")
-   # image = tf.io.decode_png(image, channels=3)
-   # plt.imshow(image)
-   # img = detect_model.process_whole_image(image)
-   
-   # for i in range(len(scores)):
-   #    if scores[i] >= 0.1:
-   #       print(f"class = {class_ids[i]}, boxes = {boxes[i]}, scores = {(scores[i]*100):.2f}%")
-
+   ap = argparse.ArgumentParser()
+   ap.add_argument("-f", "--frame_tick", type=int, help="detects every x frames.", default=1)
    video = cv2.VideoCapture(1)
-   # cv2.imshow("test", draw)
+   args = vars(ap.parse_args())
+   frame_tick = args["frame_tick"]
    counter = 0
-   cropcount = 1
    RED = (0,0,255)
    WHITE = (255, 255, 255)
    box_list = []
    text_list = []
    while True:
       ret, frame = video.read()
-      if counter == 60:
+      if counter == frame_tick:
          box_list = []
          text_list = []
          scores, coordinates = detect_model.getDog(frame)
          if scores != -1:
-            xmin = coordinates[0][0]
-            xmax = coordinates[1][0]
-            ymin = coordinates[0][1]
-            ymax = coordinates[1][1]
-            new_img = frame[ymin:ymax, xmin:xmax]
-            cv2.imwrite(f"crop{cropcount}.png", new_img)
-            cropcount+=1
-
             box_list.append(coordinates)
             text_list.append(f"DOG {scores*100:.2f}%")
          counter = 0
