@@ -9,7 +9,8 @@ from object import ObjectDetectModel
 
 class DogModel(ObjectDetectModel):
    # Private class attribute
-   __defaultPath = "breed_model/Models/2022_08_04-05_09_1659589784-trained_1000"
+   __defaultPath = "./Models/TFLite_Models/mobilenetV3_adam_trained.tflite"
+   __classes = ['Afghan_hound', 'African_hunting_dog', 'Airedale', 'American_Staffordshire_terrier', 'Appenzeller', 'Australian_terrier', 'Bedlington_terrier', 'Bernese_mountain_dog', 'Blenheim_spaniel', 'Border_collie', 'Border_terrier', 'Boston_bull', 'Bouvier_des_Flandres', 'Brabancon_griffon', 'Brittany_spaniel', 'Cardigan', 'Chesapeake_Bay_retriever', 'Chihuahua', 'Dandie_Dinmont', 'Doberman', 'English_foxhound', 'English_setter', 'English_springer', 'EntleBucher', 'Eskimo_dog', 'French_bulldog', 'German_shepherd', 'German_shorthaired_pointer', 'Gordon_setter', 'Great_Dane', 'Great_Pyrenees', 'Greater_Swiss_Mountain_dog', 'Ibizan_hound', 'Irish_setter', 'Irish_terrier', 'Irish_water_spaniel', 'Irish_wolfhound', 'Italian_greyhound', 'Japanese_spaniel', 'Kerry_blue_terrier', 'Labrador_retriever', 'Lakeland_terrier', 'Leonberg', 'Lhasa', 'Maltese_dog', 'Mexican_hairless', 'Newfoundland', 'Norfolk_terrier', 'Norwegian_elkhound', 'Norwich_terrier', 'Old_English_sheepdog', 'Pekinese', 'Pembroke', 'Pomeranian', 'Rhodesian_ridgeback', 'Rottweiler', 'Saint_Bernard', 'Saluki', 'Samoyed', 'Scotch_terrier', 'Scottish_deerhound', 'Sealyham_terrier', 'Shetland_sheepdog', 'ShihTzu', 'Siberian_husky', 'Staffordshire_bullterrier', 'Sussex_spaniel', 'Tibetan_mastiff', 'Tibetan_terrier', 'Walker_hound', 'Weimaraner', 'Welsh_springer_spaniel', 'West_Highland_white_terrier', 'Yorkshire_terrier', 'affenpinscher', 'basenji', 'basset', 'beagle', 'blackandtan_coonhound', 'bloodhound', 'bluetick', 'borzoi', 'boxer', 'briard', 'bull_mastiff', 'cairn', 'chow', 'clumber', 'cocker_spaniel', 'collie', 'curlycoated_retriever', 'dhole', 'dingo', 'flatcoated_retriever', 'giant_schnauzer', 'golden_retriever', 'groenendael', 'keeshond', 'kelpie', 'komondor', 'kuvasz', 'malamute', 'malinois', 'miniature_pinscher', 'miniature_poodle', 'miniature_schnauzer', 'otterhound', 'papillon', 'pug', 'redbone', 'schipperke', 'silky_terrier', 'softcoated_wheaten_terrier', 'standard_poodle', 'standard_schnauzer', 'toy_poodle', 'toy_terrier', 'vizsla', 'whippet', 'wirehaired_fox_terrier']
 
    # Constructors
    def __init__(self, model_path) -> None:
@@ -30,9 +31,14 @@ class DogModel(ObjectDetectModel):
       """
       Loads a saved model from a specified path
       """
-      print(f"Loading saved model from: {model_path}")
-      model = tf.keras.models.load_model(model_path)
+      print(f"Loading TFLite model from: {model_path}")
+      model = tf.lite.Interpreter(model_path)
+      model.allocate_tensors()
       return model
+
+   @classmethod
+   def classes(cls):
+      return cls.__classes
 
    # Public getter/setter method for the model
    @property
@@ -59,40 +65,41 @@ class DogModel(ObjectDetectModel):
       processed_image = tf.image.convert_image_dtype(new_image, tf.float32)
       #Resize to (224,224)
       processed_image = tf.image.resize(processed_image, size=[length, width])
-      return tf.data.Dataset.from_tensor_slices([processed_image]).batch(32), coordinates
+      return np.array([processed_image]), coordinates
       
    # Check accuracy of prediction
-   def predict(self, image, check=False):
+   def predict(self, image, check=False, verbose=False):
       processed_image, coordinate = self.process_image(image)
-      if processed_image == -1:
+      if coordinate == -1:
          return -1, -1
-      self.prediction_probability = self.breed_model.predict(processed_image)
+      
+      input_details = self.__breed_model.get_input_details()
+      output_details = self.__breed_model.get_output_details()
+      self.__breed_model.set_tensor(input_details[0]['index'], processed_image)
+      self.__breed_model.invoke()
+      self.prediction_probability = self.__breed_model.get_tensor(output_details[0]['index'])
       if check:
-         breed = self.predict_check()
+         breed = self.predict_check(verbose)
          return coordinate, breed
       else:
          return coordinate
       
    def predict_check(self, verbose=False):
-      labels = []
-      for folders in os.listdir("./breed_model/Images/train_images"):
-         labels.append("".join(folders.split("-")[1:]))
-      unique_breeds = np.unique(labels)
       if verbose:
-         print(unique_breeds)
          print(self.prediction_probability)
-      label = unique_breeds[np.argmax(self.prediction_probability[0])]
+      print(np.argmax(self.prediction_probability[0]))
       score = np.max(self.prediction_probability[0])
       print(f"Max value (probability of prediction) : {score}")
       print(f"Sum : {np.sum(self.prediction_probability[0])}")
       print(f"Max Index: {np.argmax(self.prediction_probability[0])}")
+      label = DogModel.__classes[np.argmax(self.prediction_probability[0])]
       print(f"Predicted label: {label}")
       return (label, score)
 
 def main():
    ap = argparse.ArgumentParser()
    ap.add_argument("-p", "--path", type=str,help="path of the saved model.")
-   ap.add_argument("-f", "--frame_tick", type=int, help="detects every x frames.", default=1)
+   ap.add_argument("-f", "--frame_tick", type=int, help="detects every x frames.", default=2)
    args = vars(ap.parse_args())
    model_path = args["path"]
    frame_tick = args["frame_tick"]
@@ -116,7 +123,7 @@ def main():
          text_list = []
          if coordinates != -1:
             box_list.append(coordinates)
-            text_list.append(f"DOGBREED = {breed[0]} {breed[1]*100:.2f}%")
+            text_list.append(f"{breed[0]} {breed[1]*100:.2f}%")
          counter = 0
       counter+= 1   
 

@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 # ObjectDetectionModel Class
 class ObjectDetectModel:
    # Class attributes
-   __OBJECT_MODEL_PATH = "ssd_mobilenet_v2_2"
+   __OBJECT_MODEL_PATH = "./Models/TFLite_Models/ssd_mobilenetV2.tflite"
 
    # Special dunder methods
    def __init__(self) -> None:
@@ -34,7 +34,8 @@ class ObjectDetectModel:
 
    # Private Instance methods
    def __loadModel(self):
-      return tf.keras.models.load_model(self.__OBJECT_MODEL_PATH)
+      interpreter = tf.lite.Interpreter(self.__OBJECT_MODEL_PATH)
+      return interpreter
 
    # Public Instance methods
    def detect_object(self, image):
@@ -50,11 +51,17 @@ class ObjectDetectModel:
       image: Image to be detected.
       """
       img = self.process_whole_image(image)
-      results = self.__object_model(img)
-      results = {key:value.numpy() for key,value in results.items()}
-      class_ids = results["detection_classes"][0]
-      boxes = results["detection_boxes"][0]
-      scores = results["detection_scores"][0]
+      im_height, im_width = image.shape[:2]
+      # Get input and output tensors.
+      input_details = self.__object_model.get_input_details()
+      output_details = self.__object_model.get_output_details()
+      self.__object_model.resize_tensor_input(input_details[0]['index'], [1, im_height, im_width, 3])
+      self.__object_model.allocate_tensors()
+      self.__object_model.set_tensor(input_details[0]['index'], img)
+      self.__object_model.invoke()
+      class_ids = self.__object_model.get_tensor(output_details[5]['index'])[0]
+      boxes = self.__object_model.get_tensor(output_details[4]['index'])[0]
+      scores = self.__object_model.get_tensor(output_details[6]['index'])[0]
       return class_ids, boxes, scores
 
    def getDog(self, image):
@@ -69,7 +76,6 @@ class ObjectDetectModel:
       """
       im_height, im_width = image.shape[:2]
       class_ids, boxes, scores = self.detect_object(image)
-
       for i in range(min(boxes.shape[0], 10)):
          if scores[i] >= 0.1 and class_ids[i] == 18:
             xmin = int(boxes[i][1] * im_width) - 10 if int(boxes[i][1] * im_width) - 10 > 0 else 0
